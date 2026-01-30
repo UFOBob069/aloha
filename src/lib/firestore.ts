@@ -29,6 +29,9 @@ export interface Member {
   whatBringsYou?: string;
   role: 'member' | 'admin' | 'facilitator';
   photoURL?: string;
+  inviteCode?: string;
+  invitedBy?: string;
+  inviteCount?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -144,6 +147,57 @@ export async function updateMember(id: string, data: Partial<Omit<Member, 'id' |
 
 export async function getAllMembers(): Promise<Member[]> {
   const snapshot = await adminDb().collection(COLLECTIONS.MEMBERS).orderBy('createdAt', 'desc').get();
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Member));
+}
+
+// Invitation operations
+function generateInviteCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+export async function getOrCreateInviteCode(memberId: string): Promise<string> {
+  const member = await getMemberById(memberId);
+  if (!member) throw new Error('Member not found');
+
+  if (member.inviteCode) {
+    return member.inviteCode;
+  }
+
+  const inviteCode = generateInviteCode();
+  await updateMember(memberId, { inviteCode });
+  return inviteCode;
+}
+
+export async function getMemberByInviteCode(inviteCode: string): Promise<Member | null> {
+  const snapshot = await adminDb().collection(COLLECTIONS.MEMBERS)
+    .where('inviteCode', '==', inviteCode.toUpperCase())
+    .limit(1)
+    .get();
+
+  if (snapshot.empty) return null;
+  const doc = snapshot.docs[0];
+  return { id: doc.id, ...doc.data() } as Member;
+}
+
+export async function incrementInviteCount(memberId: string): Promise<void> {
+  const member = await getMemberById(memberId);
+  if (!member) return;
+
+  const currentCount = member.inviteCount || 0;
+  await updateMember(memberId, { inviteCount: currentCount + 1 });
+}
+
+export async function getInvitedMembers(memberId: string): Promise<Member[]> {
+  const snapshot = await adminDb().collection(COLLECTIONS.MEMBERS)
+    .where('invitedBy', '==', memberId)
+    .orderBy('createdAt', 'desc')
+    .get();
+
   return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Member));
 }
 

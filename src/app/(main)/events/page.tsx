@@ -84,8 +84,6 @@ export default async function EventsPage() {
     })
   );
 
-  const isAdmin = currentUser.role === 'admin';
-
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -93,14 +91,12 @@ export default async function EventsPage() {
           <h1 className="text-3xl font-bold text-gray-900">Events & Gatherings</h1>
           <p className="mt-1 text-gray-600">Join group calls, local meetups, and community gatherings.</p>
         </div>
-        {isAdmin && (
-          <Link
-            href="/events/new"
-            className="px-4 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors"
-          >
-            Create Event
-          </Link>
-        )}
+        <Link
+          href="/events/new"
+          className="px-4 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors"
+        >
+          Create Event
+        </Link>
       </div>
 
       {/* Calendar View */}

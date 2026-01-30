@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createSessionCookie, verifyIdToken } from '@/lib/auth';
-import { getMemberById, createMember, toTimestamp } from '@/lib/firestore';
+import { getMemberById, createMember, getMemberByInviteCode, incrementInviteCount } from '@/lib/firestore';
 
 const SESSION_COOKIE_NAME = 'session';
 const SESSION_EXPIRY_DAYS = 14;
@@ -9,7 +9,7 @@ const SESSION_EXPIRY_DAYS = 14;
 // Create a session from Firebase ID token
 export async function POST(request: NextRequest) {
   try {
-    const { idToken, isNewUser, displayName, photoURL, location, whatBringsYou } = await request.json();
+    const { idToken, isNewUser, displayName, photoURL, location, whatBringsYou, inviteCode } = await request.json();
 
     if (!idToken) {
       return NextResponse.json({ error: 'ID token is required' }, { status: 400 });
@@ -22,6 +22,15 @@ export async function POST(request: NextRequest) {
     }
 
     const { uid, email, name, picture } = decodedToken;
+
+    // Check if there's a valid inviter
+    let inviterId: string | undefined;
+    if (inviteCode) {
+      const inviter = await getMemberByInviteCode(inviteCode);
+      if (inviter) {
+        inviterId = inviter.id;
+      }
+    }
 
     // Check if member exists in Firestore
     let member = await getMemberById(uid);
@@ -36,7 +45,13 @@ export async function POST(request: NextRequest) {
         whatBringsYou: whatBringsYou,
         photoURL: photoURL || picture,
         role: 'member',
+        invitedBy: inviterId,
       });
+
+      // Increment inviter's invite count
+      if (inviterId) {
+        await incrementInviteCount(inviterId);
+      }
     } else if (isNewUser) {
       // This shouldn't happen, but handle it gracefully
       console.warn('User marked as new but already exists:', uid);

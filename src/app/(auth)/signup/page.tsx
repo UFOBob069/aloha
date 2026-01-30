@@ -1,19 +1,22 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
 import Button from '@/components/Button';
 import Input from '@/components/Input';
 import Textarea from '@/components/Textarea';
 
-export default function SignupPage() {
+function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const inviteCode = searchParams.get('ref');
   const { signUpWithEmail, signInWithGoogle, user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState('');
+  const [inviterName, setInviterName] = useState<string | null>(null);
   const [step, setStep] = useState<'auth' | 'profile'>('auth');
   const [formData, setFormData] = useState({
     name: '',
@@ -22,6 +25,22 @@ export default function SignupPage() {
     location: '',
     whatBringsYou: '',
   });
+
+  // Fetch inviter name if there's an invite code
+  useEffect(() => {
+    if (inviteCode) {
+      fetch(`/api/invite/validate?code=${inviteCode}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.inviterName) {
+            setInviterName(data.inviterName);
+          }
+        })
+        .catch(() => {
+          // Ignore errors, just don't show inviter name
+        });
+    }
+  }, [inviteCode]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData((prev) => ({
@@ -43,6 +62,7 @@ export default function SignupPage() {
         photoURL,
         location: formData.location,
         whatBringsYou: formData.whatBringsYou,
+        inviteCode: inviteCode || undefined,
       }),
     });
 
@@ -212,6 +232,12 @@ export default function SignupPage() {
               <p className="mt-2 text-gray-600">Start your journey to meaningful connection</p>
             </div>
 
+            {inviterName && (
+              <div className="mb-6 p-4 bg-teal-50 border border-teal-200 rounded-lg text-teal-700 text-sm text-center">
+                <span className="font-medium">{inviterName}</span> invited you to join Aloha Rising!
+              </div>
+            )}
+
             {error && (
               <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
                 {error}
@@ -336,5 +362,13 @@ export default function SignupPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gradient-to-b from-teal-50 to-white flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600"></div></div>}>
+      <SignupForm />
+    </Suspense>
   );
 }

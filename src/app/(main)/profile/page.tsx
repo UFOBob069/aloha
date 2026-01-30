@@ -7,6 +7,7 @@ import Input from '@/components/Input';
 import Textarea from '@/components/Textarea';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/Card';
 import ProfilePhotoUpload from '@/components/ProfilePhotoUpload';
+import InviteLink from '@/components/InviteLink';
 
 interface ProfileData {
   id: string;
@@ -84,7 +85,10 @@ export default function ProfilePage() {
       }
 
       setSuccess('Profile updated successfully!');
-      router.refresh();
+      // Redirect to dashboard after short delay to show success message
+      setTimeout(() => {
+        router.push('/dashboard');
+      }, 1000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
@@ -208,6 +212,16 @@ export default function ProfilePage() {
               </Button>
             </div>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Invite Friends</CardTitle>
+          <CardDescription>Grow the community by inviting others to join</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <InviteLink />
         </CardContent>
       </Card>
     </div>

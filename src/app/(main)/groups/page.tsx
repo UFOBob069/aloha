@@ -60,14 +60,12 @@ export default async function GroupsPage() {
           <h1 className="text-3xl font-bold text-gray-900">Community Groups</h1>
           <p className="mt-1 text-gray-600">Find your place in small, purpose-driven groups.</p>
         </div>
-        {(currentUser.role === 'admin' || currentUser.role === 'facilitator') && (
-          <Link
-            href="/groups/new"
-            className="px-4 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors"
-          >
-            Create Group
-          </Link>
-        )}
+        <Link
+          href="/groups/new"
+          className="px-4 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors"
+        >
+          Create Group
+        </Link>
       </div>
 
       {/* My Groups */}
