@@ -10,6 +10,7 @@ import {
 } from '@/lib/firestore';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/Card';
 import JoinGroupButton from './JoinGroupButton';
+import DiscussionForum from '@/components/DiscussionForum';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -184,6 +185,19 @@ export default async function GroupPage({ params }: Props) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Discussion Forum */}
+      {isMember && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Discussions</CardTitle>
+            <CardDescription>Share ideas and connect with group members</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <DiscussionForum groupId={group.id} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Upcoming Events */}
       {(isMember || isAdminOrFacilitator) && (

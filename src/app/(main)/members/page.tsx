@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { getAllMembers } from '@/lib/firestore';
 import Card from '@/components/Card';
+import MemberSearch from '@/components/MemberSearch';
 
 export default async function MembersPage() {
   const currentUser = await getCurrentUser();
@@ -25,11 +26,16 @@ export default async function MembersPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Community Members</h1>
-        <p className="mt-1 text-gray-600">
-          Connect with people who share your interests or can help you on your journey.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Community Members</h1>
+          <p className="mt-1 text-gray-600">
+            Connect with people who share your interests or can help you on your journey.
+          </p>
+        </div>
+        <div className="sm:w-64">
+          <MemberSearch />
+        </div>
       </div>
 
       {members.length > 0 ? (

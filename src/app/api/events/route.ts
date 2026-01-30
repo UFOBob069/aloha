@@ -1,8 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
-import { Timestamp } from 'firebase-admin/firestore';
 import { getCurrentUser } from '@/lib/auth';
-import { createEvent, addEventAttendee, getGroupMembers, toTimestamp } from '@/lib/firestore';
+import {
+  createEvent,
+  addEventAttendee,
+  getGroupMembers,
+  toTimestamp,
+  getUpcomingEvents,
+  getGroupById,
+  getMemberById,
+  getEventAttendeeCount,
+  isEventAttendee,
+} from '@/lib/firestore';
+
+export async function GET(request: NextRequest) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const upcomingEvents = await getUpcomingEvents(50);
+
+    const eventsWithDetails = await Promise.all(
+      upcomingEvents.map(async (event) => {
+        const group = event.groupId ? await getGroupById(event.groupId) : null;
+        const creator = await getMemberById(event.createdBy);
+        const attendeeCount = await getEventAttendeeCount(event.id);
+        const attending = await isEventAttendee(event.id, user.id);
+
+        return {
+          id: event.id,
+          title: event.title,
+          description: event.description,
+          eventDate: event.eventDate.toDate().toISOString(),
+          eventType: event.eventType,
+          meetingLink: event.meetingLink,
+          location: event.location,
+          groupId: event.groupId,
+          groupName: group?.name,
+          creatorName: creator?.name || 'Unknown',
+          attendeeCount,
+          isAttending: attending,
+        };
+      })
+    );
+
+    return NextResponse.json({ upcoming: eventsWithDetails });
+  } catch (error) {
+    console.error('Get events error:', error);
+    return NextResponse.json({ error: 'Failed to get events' }, { status: 500 });
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {

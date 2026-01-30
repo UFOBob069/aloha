@@ -6,6 +6,7 @@ import Button from '@/components/Button';
 import Input from '@/components/Input';
 import Textarea from '@/components/Textarea';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/Card';
+import ProfilePhotoUpload from '@/components/ProfilePhotoUpload';
 
 interface ProfileData {
   id: string;
@@ -13,8 +14,9 @@ interface ProfileData {
   email: string;
   location: string;
   bio: string;
-  can_help_with: string;
-  looking_for: string;
+  canHelpWith: string;
+  lookingFor: string;
+  photoURL?: string;
 }
 
 export default function ProfilePage() {
@@ -47,6 +49,12 @@ export default function ProfilePage() {
     setProfile((prev) => (prev ? { ...prev, [e.target.name]: e.target.value } : null));
   };
 
+  const handlePhotoUpdated = (photoURL: string) => {
+    if (!profile) return;
+    setProfile((prev) => (prev ? { ...prev, photoURL } : null));
+    setSuccess('Photo updated successfully!');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
@@ -65,8 +73,8 @@ export default function ProfilePage() {
           name: profile.name,
           location: profile.location,
           bio: profile.bio,
-          can_help_with: profile.can_help_with,
-          looking_for: profile.looking_for,
+          canHelpWith: profile.canHelpWith,
+          lookingFor: profile.lookingFor,
         }),
       });
 
@@ -108,6 +116,20 @@ export default function ProfilePage() {
           Help others get to know you by sharing a bit about yourself.
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Profile Photo</CardTitle>
+          <CardDescription>Add a photo to help others recognize you</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ProfilePhotoUpload
+            currentPhotoURL={profile.photoURL}
+            userName={profile.name}
+            onPhotoUpdated={handlePhotoUpdated}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -164,18 +186,18 @@ export default function ProfilePage() {
 
             <Textarea
               label="I Can Help With..."
-              name="can_help_with"
+              name="canHelpWith"
               placeholder="Share your areas of expertise, experience, or what you can offer to others..."
-              value={profile.can_help_with || ''}
+              value={profile.canHelpWith || ''}
               onChange={handleChange}
               helperText="What wisdom or experience can you share with the community?"
             />
 
             <Textarea
               label="I Am Looking For..."
-              name="looking_for"
+              name="lookingFor"
               placeholder="What kind of connections, guidance, or support are you seeking?"
-              value={profile.looking_for || ''}
+              value={profile.lookingFor || ''}
               onChange={handleChange}
               helperText="Help others understand how they might help you"
             />

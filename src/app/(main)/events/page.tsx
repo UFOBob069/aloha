@@ -9,6 +9,7 @@ import {
   isEventAttendee,
 } from '@/lib/firestore';
 import Card from '@/components/Card';
+import EventCalendar from '@/components/EventCalendar';
 
 interface EventDisplay {
   id: string;
@@ -101,6 +102,12 @@ export default async function EventsPage() {
           </Link>
         )}
       </div>
+
+      {/* Calendar View */}
+      <Card className="p-6">
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">Event Calendar</h2>
+        <EventCalendar />
+      </Card>
 
       {/* Upcoming Events */}
       <div>

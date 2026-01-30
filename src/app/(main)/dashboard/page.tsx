@@ -9,8 +9,12 @@ import {
   getPendingConversationRequests,
   getMemberById,
   getAllMembers,
+  getOnboardingProgress,
 } from '@/lib/firestore';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/Card';
+import OnboardingWizard from '@/components/OnboardingWizard';
+import ActivityFeed from '@/components/ActivityFeed';
+import MentorshipSuggestions from '@/components/MentorshipSuggestions';
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
@@ -72,6 +76,10 @@ export default async function DashboardPage() {
   // Check if profile is incomplete
   const isProfileIncomplete = !user.bio || !user.canHelpWith || !user.lookingFor;
 
+  // Get onboarding progress
+  const onboardingProgress = await getOnboardingProgress(user.id);
+  const showOnboarding = !onboardingProgress?.isComplete;
+
   return (
     <div className="space-y-8">
       {/* Welcome Header */}
@@ -80,39 +88,8 @@ export default async function DashboardPage() {
         <p className="mt-1 text-gray-600">Here is what is happening in your community today.</p>
       </div>
 
-      {/* Profile Completion Notice */}
-      {isProfileIncomplete && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
-          <div className="flex items-start gap-4">
-            <div className="flex-shrink-0">
-              <svg className="w-6 h-6 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-amber-800">Complete Your Profile</h3>
-              <p className="mt-1 text-amber-700">
-                Help others get to know you by completing your profile. Share what you can help with and what you are
-                looking for.
-              </p>
-              <Link
-                href="/profile"
-                className="inline-flex items-center mt-3 text-amber-800 font-medium hover:text-amber-900"
-              >
-                Complete Profile
-                <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Onboarding Wizard */}
+      {showOnboarding && <OnboardingWizard />}
 
       {/* Pending Conversation Requests */}
       {requestsWithNames.length > 0 && (
@@ -247,6 +224,31 @@ export default async function DashboardPage() {
                 </Link>
               </div>
             )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Activity Feed and Mentorship Suggestions */}
+      <div className="grid md:grid-cols-2 gap-6">
+        {/* Activity Feed */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Activity</CardTitle>
+            <CardDescription>What is happening in the community</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ActivityFeed />
+          </CardContent>
+        </Card>
+
+        {/* Mentorship Suggestions */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Suggested Connections</CardTitle>
+            <CardDescription>Members who match your interests</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <MentorshipSuggestions />
           </CardContent>
         </Card>
       </div>

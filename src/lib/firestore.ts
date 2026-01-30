@@ -13,6 +13,8 @@ export const COLLECTIONS = {
   EVENT_ATTENDEES: 'event_attendees',
   CONVERSATION_REQUESTS: 'conversation_requests',
   REPORTS: 'reports',
+  DISCUSSION_POSTS: 'discussion_posts',
+  ACTIVITIES: 'activities',
 } as const;
 
 // Type definitions
@@ -391,4 +393,196 @@ export async function updateReportStatus(id: string, status: 'resolved' | 'dismi
     resolvedAt: toTimestamp(),
     resolvedBy,
   });
+}
+
+// Discussion Post types and operations
+export interface DiscussionPost {
+  id: string;
+  groupId: string;
+  authorId: string;
+  title: string;
+  content: string;
+  parentId?: string; // For replies
+  replyCount: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export async function createDiscussionPost(data: Omit<DiscussionPost, 'createdAt' | 'updatedAt' | 'replyCount'>): Promise<DiscussionPost> {
+  const now = toTimestamp();
+  const postData: Omit<DiscussionPost, 'id'> = {
+    ...data,
+    replyCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await adminDb().collection(COLLECTIONS.DISCUSSION_POSTS).doc(data.id).set(postData);
+  return { ...postData, id: data.id } as DiscussionPost;
+}
+
+export async function getGroupDiscussions(groupId: string): Promise<DiscussionPost[]> {
+  const snapshot = await adminDb().collection(COLLECTIONS.DISCUSSION_POSTS)
+    .where('groupId', '==', groupId)
+    .where('parentId', '==', null)
+    .orderBy('createdAt', 'desc')
+    .get();
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as DiscussionPost));
+}
+
+export async function getDiscussionReplies(postId: string): Promise<DiscussionPost[]> {
+  const snapshot = await adminDb().collection(COLLECTIONS.DISCUSSION_POSTS)
+    .where('parentId', '==', postId)
+    .orderBy('createdAt', 'asc')
+    .get();
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as DiscussionPost));
+}
+
+export async function getDiscussionPost(id: string): Promise<DiscussionPost | null> {
+  const docRef = adminDb().collection(COLLECTIONS.DISCUSSION_POSTS).doc(id);
+  const docSnap = await docRef.get();
+  if (!docSnap.exists) return null;
+  return { id: docSnap.id, ...docSnap.data() } as DiscussionPost;
+}
+
+export async function incrementReplyCount(postId: string): Promise<void> {
+  const docRef = adminDb().collection(COLLECTIONS.DISCUSSION_POSTS).doc(postId);
+  const doc = await docRef.get();
+  if (doc.exists) {
+    const currentCount = doc.data()?.replyCount || 0;
+    await docRef.update({ replyCount: currentCount + 1 });
+  }
+}
+
+// Activity Feed types and operations
+export interface Activity {
+  id: string;
+  type: 'member_joined' | 'group_created' | 'event_created' | 'discussion_started' | 'member_joined_group';
+  actorId: string;
+  targetId?: string;
+  targetType?: 'group' | 'event' | 'discussion' | 'member';
+  metadata?: Record<string, string>;
+  createdAt: Timestamp;
+}
+
+export async function createActivity(data: Omit<Activity, 'createdAt'>): Promise<Activity> {
+  const activityData: Omit<Activity, 'id'> = {
+    ...data,
+    createdAt: toTimestamp(),
+  };
+
+  await adminDb().collection(COLLECTIONS.ACTIVITIES).doc(data.id).set(activityData);
+  return { ...activityData, id: data.id } as Activity;
+}
+
+export async function getRecentActivities(limitCount: number = 20): Promise<Activity[]> {
+  const snapshot = await adminDb().collection(COLLECTIONS.ACTIVITIES)
+    .orderBy('createdAt', 'desc')
+    .limit(limitCount)
+    .get();
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Activity));
+}
+
+// Member search operations
+export async function searchMembers(query: string): Promise<Member[]> {
+  // Firestore doesn't support full-text search, so we get all members and filter client-side
+  // For production, consider using Algolia or similar
+  const allMembers = await getAllMembers();
+  const lowerQuery = query.toLowerCase();
+
+  return allMembers.filter((member) => {
+    const searchableText = [
+      member.name,
+      member.location,
+      member.bio,
+      member.canHelpWith,
+      member.lookingFor,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return searchableText.includes(lowerQuery);
+  });
+}
+
+export async function getMembersByFilters(filters: {
+  location?: string;
+  canHelpWith?: string;
+  lookingFor?: string;
+}): Promise<Member[]> {
+  const allMembers = await getAllMembers();
+
+  return allMembers.filter((member) => {
+    if (filters.location && !member.location?.toLowerCase().includes(filters.location.toLowerCase())) {
+      return false;
+    }
+    if (filters.canHelpWith && !member.canHelpWith?.toLowerCase().includes(filters.canHelpWith.toLowerCase())) {
+      return false;
+    }
+    if (filters.lookingFor && !member.lookingFor?.toLowerCase().includes(filters.lookingFor.toLowerCase())) {
+      return false;
+    }
+    return true;
+  });
+}
+
+// Mentorship matching - find members with complementary skills
+export async function getSuggestedMentors(memberId: string): Promise<Member[]> {
+  const member = await getMemberById(memberId);
+  if (!member || !member.lookingFor) return [];
+
+  const allMembers = await getAllMembers();
+  const lookingForKeywords = member.lookingFor.toLowerCase().split(/[,\s]+/).filter(k => k.length > 3);
+
+  return allMembers
+    .filter((m) => m.id !== memberId && m.canHelpWith)
+    .map((m) => {
+      const canHelpWith = m.canHelpWith?.toLowerCase() || '';
+      const matchScore = lookingForKeywords.reduce((score, keyword) => {
+        return score + (canHelpWith.includes(keyword) ? 1 : 0);
+      }, 0);
+      return { member: m, score: matchScore };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map((item) => item.member);
+}
+
+// Onboarding progress
+export interface OnboardingProgress {
+  hasPhoto: boolean;
+  hasBio: boolean;
+  hasCanHelpWith: boolean;
+  hasLookingFor: boolean;
+  hasJoinedGroup: boolean;
+  isComplete: boolean;
+  completionPercentage: number;
+}
+
+export async function getOnboardingProgress(memberId: string): Promise<OnboardingProgress> {
+  const member = await getMemberById(memberId);
+  const memberGroups = await getMemberGroups(memberId);
+
+  const hasPhoto = !!member?.photoURL;
+  const hasBio = !!member?.bio && member.bio.length > 10;
+  const hasCanHelpWith = !!member?.canHelpWith && member.canHelpWith.length > 10;
+  const hasLookingFor = !!member?.lookingFor && member.lookingFor.length > 10;
+  const hasJoinedGroup = memberGroups.length > 0;
+
+  const steps = [hasPhoto, hasBio, hasCanHelpWith, hasLookingFor, hasJoinedGroup];
+  const completedSteps = steps.filter(Boolean).length;
+  const completionPercentage = Math.round((completedSteps / steps.length) * 100);
+  const isComplete = completedSteps === steps.length;
+
+  return {
+    hasPhoto,
+    hasBio,
+    hasCanHelpWith,
+    hasLookingFor,
+    hasJoinedGroup,
+    isComplete,
+    completionPercentage,
+  };
 }
