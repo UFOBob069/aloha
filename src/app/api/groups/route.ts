@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import { createGroup, getAllGroups, addMemberToGroup, getGroupMemberCount } from '@/lib/firestore';
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,16 +25,18 @@ export async function POST(request: NextRequest) {
     const id = uuidv4();
 
     // Create the group
-    db.prepare(`
-      INSERT INTO groups (id, name, purpose, description, cadence, max_size, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, name, purpose, description || null, cadence || null, maxSize || 20, user.id);
+    await createGroup({
+      id,
+      name,
+      purpose,
+      description: description || undefined,
+      cadence: cadence || undefined,
+      maxSize: maxSize || 20,
+      createdBy: user.id,
+    });
 
     // Add creator as facilitator
-    db.prepare(`
-      INSERT INTO group_members (group_id, member_id, role)
-      VALUES (?, ?, 'facilitator')
-    `).run(id, user.id);
+    await addMemberToGroup(id, user.id, 'facilitator');
 
     return NextResponse.json({ success: true, id });
   } catch (error) {
@@ -45,17 +47,23 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
-    const groups = db
-      .prepare(
-        `SELECT g.*, COUNT(gm.member_id) as member_count
-         FROM groups g
-         LEFT JOIN group_members gm ON g.id = gm.group_id
-         GROUP BY g.id
-         ORDER BY member_count DESC, g.created_at DESC`
-      )
-      .all();
+    const groups = await getAllGroups();
 
-    return NextResponse.json(groups);
+    // Get member count for each group
+    const groupsWithCount = await Promise.all(
+      groups.map(async (group) => {
+        const memberCount = await getGroupMemberCount(group.id);
+        return {
+          ...group,
+          memberCount,
+        };
+      })
+    );
+
+    // Sort by member count descending
+    groupsWithCount.sort((a, b) => b.memberCount - a.memberCount);
+
+    return NextResponse.json(groupsWithCount);
   } catch (error) {
     console.error('Get groups error:', error);
     return NextResponse.json({ error: 'Failed to get groups' }, { status: 500 });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import { getReport, updateReportStatus } from '@/lib/firestore';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
 
     // Get the report
-    const report = db.prepare('SELECT * FROM reports WHERE id = ?').get(id);
+    const report = await getReport(id);
 
     if (!report) {
       return NextResponse.json({ error: 'Report not found' }, { status: 404 });
@@ -31,11 +31,7 @@ export async function POST(request: NextRequest, { params }: Props) {
 
     // Update the report status
     const newStatus = action === 'resolve' ? 'resolved' : 'dismissed';
-    db.prepare(`
-      UPDATE reports
-      SET status = ?, resolved_at = CURRENT_TIMESTAMP, resolved_by = ?
-      WHERE id = ?
-    `).run(newStatus, user.id, id);
+    await updateReportStatus(id, newStatus, user.id);
 
     // Redirect back to admin page
     return NextResponse.redirect(new URL('/admin', request.url));

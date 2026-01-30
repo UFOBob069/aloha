@@ -1,7 +1,12 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { getCurrentUser, getMemberById } from '@/lib/auth';
-import db from '@/lib/db';
+import { getCurrentUser } from '@/lib/auth';
+import {
+  getMemberById,
+  getMemberGroups,
+  getGroupById,
+  getExistingConversationRequest,
+} from '@/lib/firestore';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/Card';
 import ConversationRequestButton from './ConversationRequestButton';
 import ReportButton from '@/components/ReportButton';
@@ -13,37 +18,31 @@ interface Props {
 export default async function MemberProfilePage({ params }: Props) {
   const { id } = await params;
   const currentUser = await getCurrentUser();
-  const member = getMemberById(id);
+  const member = await getMemberById(id);
 
   if (!member || !currentUser) {
     notFound();
   }
 
   // Check if there's an existing conversation request
-  const existingRequest = db
-    .prepare(
-      `SELECT * FROM conversation_requests
-       WHERE (from_member_id = ? AND to_member_id = ?)
-          OR (from_member_id = ? AND to_member_id = ?)
-       ORDER BY created_at DESC
-       LIMIT 1`
-    )
-    .get(currentUser.id, member.id, member.id, currentUser.id) as {
-    id: string;
-    status: string;
-    from_member_id: string;
-  } | undefined;
+  const existingRequest = await getExistingConversationRequest(currentUser.id, member.id);
+  const requestInfo = existingRequest
+    ? {
+        id: existingRequest.id,
+        status: existingRequest.status,
+        fromMemberId: existingRequest.fromMemberId,
+      }
+    : undefined;
 
   // Get member's groups
-  const memberGroups = db
-    .prepare(
-      `SELECT g.id, g.name, g.purpose
-       FROM groups g
-       JOIN group_members gm ON g.id = gm.group_id
-       WHERE gm.member_id = ?
-       LIMIT 5`
-    )
-    .all(member.id) as Array<{ id: string; name: string; purpose: string }>;
+  const memberGroupMemberships = await getMemberGroups(member.id);
+  const memberGroups = await Promise.all(
+    memberGroupMemberships.slice(0, 5).map(async (gm) => {
+      const group = await getGroupById(gm.groupId);
+      return group ? { id: group.id, name: group.name, purpose: group.purpose } : null;
+    })
+  );
+  const filteredGroups = memberGroups.filter((g): g is NonNullable<typeof g> => g !== null);
 
   const isOwnProfile = currentUser.id === member.id;
 
@@ -78,7 +77,7 @@ export default async function MemberProfilePage({ params }: Props) {
                 <ConversationRequestButton
                   memberId={member.id}
                   memberName={member.name}
-                  existingRequest={existingRequest}
+                  existingRequest={requestInfo}
                   currentUserId={currentUser.id}
                 />
                 <ReportButton memberId={member.id} memberName={member.name} />
@@ -100,31 +99,31 @@ export default async function MemberProfilePage({ params }: Props) {
       </Card>
 
       {/* Can Help With */}
-      {member.can_help_with && (
+      {member.canHelpWith && (
         <Card>
           <CardHeader>
             <CardTitle>I Can Help With</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{member.can_help_with}</p>
+            <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{member.canHelpWith}</p>
           </CardContent>
         </Card>
       )}
 
       {/* Looking For */}
-      {member.looking_for && (
+      {member.lookingFor && (
         <Card>
           <CardHeader>
             <CardTitle>I Am Looking For</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{member.looking_for}</p>
+            <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{member.lookingFor}</p>
           </CardContent>
         </Card>
       )}
 
       {/* Groups */}
-      {memberGroups.length > 0 && (
+      {filteredGroups.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Groups</CardTitle>
@@ -132,7 +131,7 @@ export default async function MemberProfilePage({ params }: Props) {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {memberGroups.map((group) => (
+              {filteredGroups.map((group) => (
                 <Link
                   key={group.id}
                   href={`/groups/${group.id}`}

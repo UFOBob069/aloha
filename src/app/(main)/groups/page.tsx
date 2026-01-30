@@ -1,17 +1,21 @@
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import {
+  getAllGroups,
+  getGroupMemberCount,
+  getMemberGroups,
+} from '@/lib/firestore';
 import Card from '@/components/Card';
 
-interface GroupRow {
+interface GroupDisplay {
   id: string;
   name: string;
   purpose: string;
-  description: string | null;
-  cadence: string | null;
-  max_size: number;
-  member_count: number;
-  is_member: number;
+  description?: string;
+  cadence?: string;
+  maxSize: number;
+  memberCount: number;
+  isMember: boolean;
 }
 
 export default async function GroupsPage() {
@@ -22,21 +26,32 @@ export default async function GroupsPage() {
   }
 
   // Get all groups with member count
-  const groups = db
-    .prepare(
-      `SELECT g.*,
-              COUNT(gm.member_id) as member_count,
-              EXISTS(SELECT 1 FROM group_members WHERE group_id = g.id AND member_id = ?) as is_member
-       FROM groups g
-       LEFT JOIN group_members gm ON g.id = gm.group_id
-       GROUP BY g.id
-       ORDER BY member_count DESC, g.created_at DESC`
-    )
-    .all(currentUser.id) as GroupRow[];
+  const allGroups = await getAllGroups();
+  const userMemberships = await getMemberGroups(currentUser.id);
+  const userGroupIds = new Set(userMemberships.map((gm) => gm.groupId));
+
+  const groups: GroupDisplay[] = await Promise.all(
+    allGroups.map(async (group) => {
+      const memberCount = await getGroupMemberCount(group.id);
+      return {
+        id: group.id,
+        name: group.name,
+        purpose: group.purpose,
+        description: group.description,
+        cadence: group.cadence,
+        maxSize: group.maxSize,
+        memberCount,
+        isMember: userGroupIds.has(group.id),
+      };
+    })
+  );
+
+  // Sort by member count descending
+  groups.sort((a, b) => b.memberCount - a.memberCount);
 
   // Separate user's groups from other groups
-  const myGroups = groups.filter((g) => g.is_member);
-  const otherGroups = groups.filter((g) => !g.is_member);
+  const myGroups = groups.filter((g) => g.isMember);
+  const otherGroups = groups.filter((g) => !g.isMember);
 
   return (
     <div className="space-y-8">
@@ -92,8 +107,8 @@ export default async function GroupsPage() {
   );
 }
 
-function GroupCard({ group, isMember = false }: { group: GroupRow; isMember?: boolean }) {
-  const spotsLeft = group.max_size - group.member_count;
+function GroupCard({ group, isMember = false }: { group: GroupDisplay; isMember?: boolean }) {
+  const spotsLeft = group.maxSize - group.memberCount;
 
   return (
     <Link href={`/groups/${group.id}`}>
@@ -131,7 +146,7 @@ function GroupCard({ group, isMember = false }: { group: GroupRow; isMember?: bo
                 d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
               />
             </svg>
-            {group.member_count} member{group.member_count !== 1 ? 's' : ''}
+            {group.memberCount} member{group.memberCount !== 1 ? 's' : ''}
           </div>
           {!isMember && spotsLeft > 0 && (
             <span className="text-sm text-amber-600">{spotsLeft} spot{spotsLeft !== 1 ? 's' : ''} left</span>

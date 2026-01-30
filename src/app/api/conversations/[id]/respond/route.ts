@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import { getConversationRequest, updateConversationRequestStatus } from '@/lib/firestore';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -23,16 +23,14 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
 
     // Get the conversation request
-    const conversationRequest = db
-      .prepare('SELECT * FROM conversation_requests WHERE id = ?')
-      .get(id) as { id: string; to_member_id: string; status: string } | undefined;
+    const conversationRequest = await getConversationRequest(id);
 
     if (!conversationRequest) {
       return NextResponse.json({ error: 'Request not found' }, { status: 404 });
     }
 
     // Only the recipient can respond
-    if (conversationRequest.to_member_id !== user.id) {
+    if (conversationRequest.toMemberId !== user.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
@@ -42,11 +40,7 @@ export async function POST(request: NextRequest, { params }: Props) {
 
     // Update the request status
     const newStatus = action === 'accept' ? 'accepted' : 'declined';
-    db.prepare(`
-      UPDATE conversation_requests
-      SET status = ?, responded_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(newStatus, id);
+    await updateConversationRequestStatus(id, newStatus);
 
     // Redirect back to dashboard
     return NextResponse.redirect(new URL('/dashboard', request.url));

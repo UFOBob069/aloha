@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUser, updateMember } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/auth';
+import { updateMember } from '@/lib/firestore';
 
 export async function GET() {
   try {
@@ -15,8 +16,9 @@ export async function GET() {
       email: user.email,
       location: user.location,
       bio: user.bio,
-      can_help_with: user.can_help_with,
-      looking_for: user.looking_for,
+      canHelpWith: user.canHelpWith,
+      lookingFor: user.lookingFor,
+      photoURL: user.photoURL,
       role: user.role,
     });
   } catch (error) {
@@ -35,12 +37,12 @@ export async function PUT(request: NextRequest) {
 
     const data = await request.json();
 
-    updateMember(user.id, {
+    await updateMember(user.id, {
       name: data.name,
       location: data.location,
       bio: data.bio,
-      can_help_with: data.can_help_with,
-      looking_for: data.looking_for,
+      canHelpWith: data.canHelpWith,
+      lookingFor: data.lookingFor,
     });
 
     return NextResponse.json({ success: true });

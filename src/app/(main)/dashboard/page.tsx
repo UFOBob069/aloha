@@ -1,6 +1,15 @@
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import {
+  getMemberGroups,
+  getGroupById,
+  getGroupMemberCount,
+  getUpcomingEvents,
+  getGroupById as getGroup,
+  getPendingConversationRequests,
+  getMemberById,
+  getAllMembers,
+} from '@/lib/firestore';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/Card';
 
 export default async function DashboardPage() {
@@ -11,56 +20,57 @@ export default async function DashboardPage() {
   }
 
   // Get user's groups
-  const userGroups = db
-    .prepare(
-      `SELECT g.*, COUNT(gm2.member_id) as member_count
-       FROM groups g
-       JOIN group_members gm ON g.id = gm.group_id
-       LEFT JOIN group_members gm2 ON g.id = gm2.group_id
-       WHERE gm.member_id = ?
-       GROUP BY g.id
-       ORDER BY gm.joined_at DESC
-       LIMIT 3`
-    )
-    .all(user.id) as Array<{ id: string; name: string; purpose: string; member_count: number }>;
+  const memberGroups = await getMemberGroups(user.id);
+  const userGroups = await Promise.all(
+    memberGroups.slice(0, 3).map(async (gm) => {
+      const group = await getGroupById(gm.groupId);
+      const memberCount = await getGroupMemberCount(gm.groupId);
+      return group ? { ...group, memberCount } : null;
+    })
+  );
+  const filteredGroups = userGroups.filter((g): g is NonNullable<typeof g> => g !== null);
 
   // Get upcoming events
-  const upcomingEvents = db
-    .prepare(
-      `SELECT e.*, g.name as group_name
-       FROM events e
-       LEFT JOIN groups g ON e.group_id = g.id
-       WHERE e.event_date > datetime('now')
-       ORDER BY e.event_date ASC
-       LIMIT 3`
-    )
-    .all() as Array<{ id: string; title: string; event_date: string; group_name: string | null }>;
+  const upcomingEvents = await getUpcomingEvents(3);
+  const eventsWithGroups = await Promise.all(
+    upcomingEvents.map(async (event) => {
+      const group = event.groupId ? await getGroup(event.groupId) : null;
+      return {
+        ...event,
+        groupName: group?.name || null,
+        eventDate: event.eventDate.toDate().toISOString(),
+      };
+    })
+  );
 
   // Get pending conversation requests
-  const pendingRequests = db
-    .prepare(
-      `SELECT cr.*, m.name as from_name
-       FROM conversation_requests cr
-       JOIN members m ON cr.from_member_id = m.id
-       WHERE cr.to_member_id = ? AND cr.status = 'pending'
-       ORDER BY cr.created_at DESC
-       LIMIT 5`
-    )
-    .all(user.id) as Array<{ id: string; from_name: string; message: string; created_at: string }>;
+  const pendingRequests = await getPendingConversationRequests(user.id);
+  const requestsWithNames = await Promise.all(
+    pendingRequests.slice(0, 5).map(async (request) => {
+      const fromMember = await getMemberById(request.fromMemberId);
+      return {
+        id: request.id,
+        fromName: fromMember?.name || 'Unknown',
+        message: request.message,
+        createdAt: request.createdAt.toDate().toISOString(),
+      };
+    })
+  );
 
   // Get recent members
-  const recentMembers = db
-    .prepare(
-      `SELECT id, name, bio, can_help_with
-       FROM members
-       WHERE id != ?
-       ORDER BY created_at DESC
-       LIMIT 4`
-    )
-    .all(user.id) as Array<{ id: string; name: string; bio: string | null; can_help_with: string | null }>;
+  const allMembers = await getAllMembers();
+  const recentMembers = allMembers
+    .filter((m) => m.id !== user.id)
+    .slice(0, 4)
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      bio: m.bio,
+      canHelpWith: m.canHelpWith,
+    }));
 
   // Check if profile is incomplete
-  const isProfileIncomplete = !user.bio || !user.can_help_with || !user.looking_for;
+  const isProfileIncomplete = !user.bio || !user.canHelpWith || !user.lookingFor;
 
   return (
     <div className="space-y-8">
@@ -105,7 +115,7 @@ export default async function DashboardPage() {
       )}
 
       {/* Pending Conversation Requests */}
-      {pendingRequests.length > 0 && (
+      {requestsWithNames.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Conversation Requests</CardTitle>
@@ -113,10 +123,10 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {pendingRequests.map((request) => (
+              {requestsWithNames.map((request) => (
                 <div key={request.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                   <div>
-                    <p className="font-medium text-gray-900">{request.from_name}</p>
+                    <p className="font-medium text-gray-900">{request.fromName}</p>
                     {request.message && <p className="text-sm text-gray-600 mt-1">&ldquo;{request.message}&rdquo;</p>}
                   </div>
                   <div className="flex gap-2">
@@ -159,9 +169,9 @@ export default async function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {userGroups.length > 0 ? (
+            {filteredGroups.length > 0 ? (
               <div className="space-y-3">
-                {userGroups.map((group) => (
+                {filteredGroups.map((group) => (
                   <Link
                     key={group.id}
                     href={`/groups/${group.id}`}
@@ -169,7 +179,7 @@ export default async function DashboardPage() {
                   >
                     <h4 className="font-medium text-gray-900">{group.name}</h4>
                     <p className="text-sm text-gray-600 mt-1 line-clamp-1">{group.purpose}</p>
-                    <p className="text-xs text-gray-500 mt-2">{group.member_count} members</p>
+                    <p className="text-xs text-gray-500 mt-2">{group.memberCount} members</p>
                   </Link>
                 ))}
               </div>
@@ -182,7 +192,7 @@ export default async function DashboardPage() {
                 >
                   Explore Groups
                   <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7-7 7" />
                   </svg>
                 </Link>
               </div>
@@ -201,18 +211,18 @@ export default async function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {upcomingEvents.length > 0 ? (
+            {eventsWithGroups.length > 0 ? (
               <div className="space-y-3">
-                {upcomingEvents.map((event) => (
+                {eventsWithGroups.map((event) => (
                   <Link
                     key={event.id}
                     href={`/events`}
                     className="block p-4 rounded-lg border border-gray-100 hover:border-teal-200 hover:bg-teal-50/50 transition-colors"
                   >
                     <h4 className="font-medium text-gray-900">{event.title}</h4>
-                    {event.group_name && <p className="text-sm text-gray-600 mt-1">{event.group_name}</p>}
+                    {event.groupName && <p className="text-sm text-gray-600 mt-1">{event.groupName}</p>}
                     <p className="text-xs text-gray-500 mt-2">
-                      {new Date(event.event_date).toLocaleDateString('en-US', {
+                      {new Date(event.eventDate).toLocaleDateString('en-US', {
                         weekday: 'short',
                         month: 'short',
                         day: 'numeric',
@@ -267,8 +277,8 @@ export default async function DashboardPage() {
                     {member.name.charAt(0).toUpperCase()}
                   </div>
                   <h4 className="font-medium text-gray-900">{member.name}</h4>
-                  {member.can_help_with && (
-                    <p className="text-sm text-gray-600 mt-1 line-clamp-2">{member.can_help_with}</p>
+                  {member.canHelpWith && (
+                    <p className="text-sm text-gray-600 mt-1 line-clamp-2">{member.canHelpWith}</p>
                   )}
                 </Link>
               ))}

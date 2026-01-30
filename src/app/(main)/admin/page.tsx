@@ -1,33 +1,40 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import {
+  getAllMembers,
+  getAllGroups,
+  getUpcomingEvents,
+  getPendingReports,
+  getMemberById,
+  getGroupById,
+} from '@/lib/firestore';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/Card';
 
 interface Stats {
-  total_members: number;
-  total_groups: number;
-  total_events: number;
-  pending_reports: number;
+  totalMembers: number;
+  totalGroups: number;
+  totalEvents: number;
+  pendingReports: number;
 }
 
-interface ReportRow {
+interface ReportDisplay {
   id: string;
-  reporter_name: string;
-  reported_member_name: string | null;
-  reported_group_name: string | null;
+  reporterName: string;
+  reportedMemberName?: string;
+  reportedGroupName?: string;
   reason: string;
-  description: string | null;
+  description?: string;
   status: string;
-  created_at: string;
+  createdAt: string;
 }
 
-interface MemberRow {
+interface MemberDisplay {
   id: string;
   name: string;
   email: string;
   role: string;
-  created_at: string;
+  createdAt: string;
 }
 
 export default async function AdminPage() {
@@ -38,48 +45,50 @@ export default async function AdminPage() {
   }
 
   // Get stats
-  const membersCount = db.prepare('SELECT COUNT(*) as count FROM members').get() as { count: number };
-  const groupsCount = db.prepare('SELECT COUNT(*) as count FROM groups').get() as { count: number };
-  const eventsCount = db
-    .prepare("SELECT COUNT(*) as count FROM events WHERE event_date > datetime('now')")
-    .get() as { count: number };
-  const pendingReports = db
-    .prepare("SELECT COUNT(*) as count FROM reports WHERE status = 'pending'")
-    .get() as { count: number };
+  const allMembers = await getAllMembers();
+  const allGroups = await getAllGroups();
+  const upcomingEvents = await getUpcomingEvents(100);
+  const pendingReportsRaw = await getPendingReports();
 
   const stats: Stats = {
-    total_members: membersCount.count,
-    total_groups: groupsCount.count,
-    total_events: eventsCount.count,
-    pending_reports: pendingReports.count,
+    totalMembers: allMembers.length,
+    totalGroups: allGroups.length,
+    totalEvents: upcomingEvents.length,
+    pendingReports: pendingReportsRaw.length,
   };
 
-  // Get pending reports
-  const reports = db
-    .prepare(
-      `SELECT r.*,
-              reporter.name as reporter_name,
-              reported_member.name as reported_member_name,
-              reported_group.name as reported_group_name
-       FROM reports r
-       JOIN members reporter ON r.reporter_id = reporter.id
-       LEFT JOIN members reported_member ON r.reported_member_id = reported_member.id
-       LEFT JOIN groups reported_group ON r.reported_group_id = reported_group.id
-       WHERE r.status = 'pending'
-       ORDER BY r.created_at DESC
-       LIMIT 10`
-    )
-    .all() as ReportRow[];
+  // Get pending reports with details
+  const reports: ReportDisplay[] = await Promise.all(
+    pendingReportsRaw.slice(0, 10).map(async (report) => {
+      const reporter = await getMemberById(report.reporterId);
+      const reportedMember = report.reportedMemberId
+        ? await getMemberById(report.reportedMemberId)
+        : null;
+      const reportedGroup = report.reportedGroupId
+        ? await getGroupById(report.reportedGroupId)
+        : null;
+
+      return {
+        id: report.id,
+        reporterName: reporter?.name || 'Unknown',
+        reportedMemberName: reportedMember?.name,
+        reportedGroupName: reportedGroup?.name,
+        reason: report.reason,
+        description: report.description,
+        status: report.status,
+        createdAt: report.createdAt.toDate().toISOString(),
+      };
+    })
+  );
 
   // Get recent members
-  const recentMembers = db
-    .prepare(
-      `SELECT id, name, email, role, created_at
-       FROM members
-       ORDER BY created_at DESC
-       LIMIT 10`
-    )
-    .all() as MemberRow[];
+  const recentMembers: MemberDisplay[] = allMembers.slice(0, 10).map((member) => ({
+    id: member.id,
+    name: member.name,
+    email: member.email,
+    role: member.role,
+    createdAt: member.createdAt.toDate().toISOString(),
+  }));
 
   return (
     <div className="space-y-8">
@@ -93,26 +102,26 @@ export default async function AdminPage() {
         <Card>
           <CardContent>
             <p className="text-sm font-medium text-gray-500">Total Members</p>
-            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.total_members}</p>
+            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalMembers}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent>
             <p className="text-sm font-medium text-gray-500">Active Groups</p>
-            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.total_groups}</p>
+            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalGroups}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent>
             <p className="text-sm font-medium text-gray-500">Upcoming Events</p>
-            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.total_events}</p>
+            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalEvents}</p>
           </CardContent>
         </Card>
-        <Card className={stats.pending_reports > 0 ? 'border-amber-200 bg-amber-50' : ''}>
+        <Card className={stats.pendingReports > 0 ? 'border-amber-200 bg-amber-50' : ''}>
           <CardContent>
             <p className="text-sm font-medium text-gray-500">Pending Reports</p>
-            <p className={`text-3xl font-bold mt-1 ${stats.pending_reports > 0 ? 'text-amber-600' : 'text-gray-900'}`}>
-              {stats.pending_reports}
+            <p className={`text-3xl font-bold mt-1 ${stats.pendingReports > 0 ? 'text-amber-600' : 'text-gray-900'}`}>
+              {stats.pendingReports}
             </p>
           </CardContent>
         </Card>
@@ -157,16 +166,16 @@ export default async function AdminPage() {
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="font-medium text-gray-900">
-                        {report.reported_member_name
-                          ? `Member: ${report.reported_member_name}`
-                          : `Group: ${report.reported_group_name}`}
+                        {report.reportedMemberName
+                          ? `Member: ${report.reportedMemberName}`
+                          : `Group: ${report.reportedGroupName}`}
                       </p>
                       <p className="text-sm text-gray-600 mt-1">
-                        Reported by {report.reporter_name} for: {report.reason}
+                        Reported by {report.reporterName} for: {report.reason}
                       </p>
                       {report.description && <p className="text-sm text-gray-600 mt-1">{report.description}</p>}
                       <p className="text-xs text-gray-500 mt-2">
-                        {new Date(report.created_at).toLocaleDateString('en-US', {
+                        {new Date(report.createdAt).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric',
@@ -249,7 +258,7 @@ export default async function AdminPage() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-gray-500 text-sm">
-                      {new Date(member.created_at).toLocaleDateString('en-US', {
+                      {new Date(member.createdAt).toLocaleDateString('en-US', {
                         month: 'short',
                         day: 'numeric',
                       })}

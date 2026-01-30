@@ -1,39 +1,18 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import {
+  getGroupById,
+  getGroupMembers,
+  getMemberById,
+  getGroupEvents,
+  isGroupMember,
+} from '@/lib/firestore';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/Card';
 import JoinGroupButton from './JoinGroupButton';
 
 interface Props {
   params: Promise<{ id: string }>;
-}
-
-interface GroupRow {
-  id: string;
-  name: string;
-  purpose: string;
-  description: string | null;
-  cadence: string | null;
-  max_size: number;
-  created_by: string;
-  creator_name: string;
-}
-
-interface MemberRow {
-  id: string;
-  name: string;
-  role: string;
-  joined_at: string;
-}
-
-interface EventRow {
-  id: string;
-  title: string;
-  description: string | null;
-  event_date: string;
-  event_type: string;
-  meeting_link: string | null;
 }
 
 export default async function GroupPage({ params }: Props) {
@@ -45,46 +24,57 @@ export default async function GroupPage({ params }: Props) {
   }
 
   // Get group details
-  const group = db
-    .prepare(
-      `SELECT g.*, m.name as creator_name
-       FROM groups g
-       JOIN members m ON g.created_by = m.id
-       WHERE g.id = ?`
-    )
-    .get(id) as GroupRow | undefined;
+  const group = await getGroupById(id);
 
   if (!group) {
     notFound();
   }
 
+  // Get group creator
+  const creator = await getMemberById(group.createdBy);
+
   // Get group members
-  const members = db
-    .prepare(
-      `SELECT m.id, m.name, gm.role, gm.joined_at
-       FROM group_members gm
-       JOIN members m ON gm.member_id = m.id
-       WHERE gm.group_id = ?
-       ORDER BY gm.role = 'facilitator' DESC, gm.joined_at ASC`
-    )
-    .all(id) as MemberRow[];
+  const groupMemberships = await getGroupMembers(id);
+  const members = await Promise.all(
+    groupMemberships.map(async (gm) => {
+      const member = await getMemberById(gm.memberId);
+      return member
+        ? {
+            id: member.id,
+            name: member.name,
+            role: gm.role,
+            joinedAt: gm.joinedAt.toDate().toISOString(),
+          }
+        : null;
+    })
+  );
+  const filteredMembers = members.filter((m): m is NonNullable<typeof m> => m !== null);
+
+  // Sort members: facilitators first, then by join date
+  filteredMembers.sort((a, b) => {
+    if (a.role === 'facilitator' && b.role !== 'facilitator') return -1;
+    if (a.role !== 'facilitator' && b.role === 'facilitator') return 1;
+    return new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime();
+  });
 
   // Check if current user is a member
-  const isMember = members.some((m) => m.id === currentUser.id);
+  const isMember = await isGroupMember(id, currentUser.id);
   const isAdminOrFacilitator =
-    currentUser.role === 'admin' || members.some((m) => m.id === currentUser.id && m.role === 'facilitator');
+    currentUser.role === 'admin' ||
+    filteredMembers.some((m) => m.id === currentUser.id && m.role === 'facilitator');
 
   // Get upcoming events for this group
-  const upcomingEvents = db
-    .prepare(
-      `SELECT * FROM events
-       WHERE group_id = ? AND event_date > datetime('now')
-       ORDER BY event_date ASC
-       LIMIT 5`
-    )
-    .all(id) as EventRow[];
+  const upcomingEvents = await getGroupEvents(id);
+  const eventsDisplay = upcomingEvents.slice(0, 5).map((event) => ({
+    id: event.id,
+    title: event.title,
+    description: event.description,
+    eventDate: event.eventDate.toDate().toISOString(),
+    eventType: event.eventType,
+    meetingLink: event.meetingLink,
+  }));
 
-  const spotsLeft = group.max_size - members.length;
+  const spotsLeft = group.maxSize - filteredMembers.length;
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -127,7 +117,7 @@ export default async function GroupPage({ params }: Props) {
                       d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
                     />
                   </svg>
-                  {members.length} / {group.max_size} members
+                  {filteredMembers.length} / {group.maxSize} members
                 </div>
               </div>
             </div>
@@ -169,12 +159,12 @@ export default async function GroupPage({ params }: Props) {
         <CardHeader>
           <CardTitle>Members</CardTitle>
           <CardDescription>
-            {members.length} member{members.length !== 1 ? 's' : ''} in this group
+            {filteredMembers.length} member{filteredMembers.length !== 1 ? 's' : ''} in this group
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid sm:grid-cols-2 gap-4">
-            {members.map((member) => (
+            {filteredMembers.map((member) => (
               <Link
                 key={member.id}
                 href={`/members/${member.id}`}
@@ -215,9 +205,9 @@ export default async function GroupPage({ params }: Props) {
             </div>
           </CardHeader>
           <CardContent>
-            {upcomingEvents.length > 0 ? (
+            {eventsDisplay.length > 0 ? (
               <div className="space-y-4">
-                {upcomingEvents.map((event) => (
+                {eventsDisplay.map((event) => (
                   <div key={event.id} className="p-4 rounded-lg border border-gray-100">
                     <div className="flex items-start justify-between">
                       <div>
@@ -226,7 +216,7 @@ export default async function GroupPage({ params }: Props) {
                           <p className="text-sm text-gray-600 mt-1">{event.description}</p>
                         )}
                         <p className="text-sm text-gray-500 mt-2">
-                          {new Date(event.event_date).toLocaleDateString('en-US', {
+                          {new Date(event.eventDate).toLocaleDateString('en-US', {
                             weekday: 'long',
                             month: 'long',
                             day: 'numeric',
@@ -235,9 +225,9 @@ export default async function GroupPage({ params }: Props) {
                           })}
                         </p>
                       </div>
-                      {event.meeting_link && (
+                      {event.meetingLink && (
                         <a
-                          href={event.meeting_link}
+                          href={event.meetingLink}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="px-3 py-1.5 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700"

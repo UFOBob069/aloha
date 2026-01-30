@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import { getGroupById, isGroupMember, getGroupMemberCount, addMemberToGroup } from '@/lib/firestore';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -16,37 +16,26 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
 
     // Get group info
-    const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(id) as
-      | { id: string; max_size: number }
-      | undefined;
+    const group = await getGroupById(id);
 
     if (!group) {
       return NextResponse.json({ error: 'Group not found' }, { status: 404 });
     }
 
     // Check if already a member
-    const existingMembership = db
-      .prepare('SELECT * FROM group_members WHERE group_id = ? AND member_id = ?')
-      .get(id, user.id);
-
-    if (existingMembership) {
+    const isMember = await isGroupMember(id, user.id);
+    if (isMember) {
       return NextResponse.json({ error: 'Already a member of this group' }, { status: 400 });
     }
 
     // Check group capacity
-    const memberCount = db
-      .prepare('SELECT COUNT(*) as count FROM group_members WHERE group_id = ?')
-      .get(id) as { count: number };
-
-    if (memberCount.count >= group.max_size) {
+    const memberCount = await getGroupMemberCount(id);
+    if (memberCount >= group.maxSize) {
       return NextResponse.json({ error: 'Group is full' }, { status: 400 });
     }
 
     // Add member to group
-    db.prepare(`
-      INSERT INTO group_members (group_id, member_id, role)
-      VALUES (?, ?, 'member')
-    `).run(id, user.id);
+    await addMemberToGroup(id, user.id, 'member');
 
     return NextResponse.json({ success: true });
   } catch (error) {

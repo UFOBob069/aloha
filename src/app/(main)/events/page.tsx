@@ -1,21 +1,28 @@
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import {
+  getUpcomingEvents,
+  getPastEvents,
+  getGroupById,
+  getMemberById,
+  getEventAttendeeCount,
+  isEventAttendee,
+} from '@/lib/firestore';
 import Card from '@/components/Card';
 
-interface EventRow {
+interface EventDisplay {
   id: string;
   title: string;
-  description: string | null;
-  event_date: string;
-  event_type: string;
-  meeting_link: string | null;
-  location: string | null;
-  group_id: string | null;
-  group_name: string | null;
-  creator_name: string;
-  attendee_count: number;
-  is_attending: number;
+  description?: string;
+  eventDate: string;
+  eventType: string;
+  meetingLink?: string;
+  location?: string;
+  groupId?: string;
+  groupName?: string;
+  creatorName: string;
+  attendeeCount: number;
+  isAttending: boolean;
 }
 
 export default async function EventsPage() {
@@ -26,40 +33,55 @@ export default async function EventsPage() {
   }
 
   // Get all upcoming events
-  const events = db
-    .prepare(
-      `SELECT e.*,
-              g.name as group_name,
-              m.name as creator_name,
-              COUNT(DISTINCT ea.member_id) as attendee_count,
-              EXISTS(SELECT 1 FROM event_attendees WHERE event_id = e.id AND member_id = ?) as is_attending
-       FROM events e
-       LEFT JOIN groups g ON e.group_id = g.id
-       JOIN members m ON e.created_by = m.id
-       LEFT JOIN event_attendees ea ON e.id = ea.event_id
-       WHERE e.event_date > datetime('now')
-       GROUP BY e.id
-       ORDER BY e.event_date ASC`
-    )
-    .all(currentUser.id) as EventRow[];
+  const upcomingEvents = await getUpcomingEvents(50);
+  const events: EventDisplay[] = await Promise.all(
+    upcomingEvents.map(async (event) => {
+      const group = event.groupId ? await getGroupById(event.groupId) : null;
+      const creator = await getMemberById(event.createdBy);
+      const attendeeCount = await getEventAttendeeCount(event.id);
+      const attending = await isEventAttendee(event.id, currentUser.id);
+
+      return {
+        id: event.id,
+        title: event.title,
+        description: event.description,
+        eventDate: event.eventDate.toDate().toISOString(),
+        eventType: event.eventType,
+        meetingLink: event.meetingLink,
+        location: event.location,
+        groupId: event.groupId,
+        groupName: group?.name,
+        creatorName: creator?.name || 'Unknown',
+        attendeeCount,
+        isAttending: attending,
+      };
+    })
+  );
 
   // Get past events
-  const pastEvents = db
-    .prepare(
-      `SELECT e.*,
-              g.name as group_name,
-              m.name as creator_name,
-              COUNT(DISTINCT ea.member_id) as attendee_count
-       FROM events e
-       LEFT JOIN groups g ON e.group_id = g.id
-       JOIN members m ON e.created_by = m.id
-       LEFT JOIN event_attendees ea ON e.id = ea.event_id
-       WHERE e.event_date <= datetime('now')
-       GROUP BY e.id
-       ORDER BY e.event_date DESC
-       LIMIT 10`
-    )
-    .all() as EventRow[];
+  const pastEventsRaw = await getPastEvents(10);
+  const pastEvents: EventDisplay[] = await Promise.all(
+    pastEventsRaw.map(async (event) => {
+      const group = event.groupId ? await getGroupById(event.groupId) : null;
+      const creator = await getMemberById(event.createdBy);
+      const attendeeCount = await getEventAttendeeCount(event.id);
+
+      return {
+        id: event.id,
+        title: event.title,
+        description: event.description,
+        eventDate: event.eventDate.toDate().toISOString(),
+        eventType: event.eventType,
+        meetingLink: event.meetingLink,
+        location: event.location,
+        groupId: event.groupId,
+        groupName: group?.name,
+        creatorName: creator?.name || 'Unknown',
+        attendeeCount,
+        isAttending: false,
+      };
+    })
+  );
 
   const isAdmin = currentUser.role === 'admin';
 
@@ -117,11 +139,11 @@ function EventCard({
   currentUserId,
   isPast = false,
 }: {
-  event: EventRow;
+  event: EventDisplay;
   currentUserId: string;
   isPast?: boolean;
 }) {
-  const eventDate = new Date(event.event_date);
+  const eventDate = new Date(event.eventDate);
 
   return (
     <Card className={isPast ? '' : 'hover:border-teal-200 transition-colors'}>
@@ -141,14 +163,14 @@ function EventCard({
           <div className="flex items-start justify-between">
             <div>
               <h3 className="font-semibold text-gray-900 text-lg">{event.title}</h3>
-              {event.group_name && (
-                <Link href={`/groups/${event.group_id}`} className="text-sm text-teal-600 hover:underline">
-                  {event.group_name}
+              {event.groupName && (
+                <Link href={`/groups/${event.groupId}`} className="text-sm text-teal-600 hover:underline">
+                  {event.groupName}
                 </Link>
               )}
             </div>
             <div className="flex items-center gap-2">
-              {event.event_type === 'online' ? (
+              {event.eventType === 'online' ? (
                 <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">Online</span>
               ) : (
                 <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
@@ -200,14 +222,14 @@ function EventCard({
                   d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
                 />
               </svg>
-              {event.attendee_count} attending
+              {event.attendeeCount} attending
             </div>
           </div>
 
           {/* Actions */}
           {!isPast && (
             <div className="mt-4 flex items-center gap-3">
-              {event.is_attending ? (
+              {event.isAttending ? (
                 <span className="inline-flex items-center px-3 py-1.5 bg-teal-100 text-teal-700 rounded-lg text-sm font-medium">
                   <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -224,9 +246,9 @@ function EventCard({
                   </button>
                 </form>
               )}
-              {event.meeting_link && (
+              {event.meetingLink && (
                 <a
-                  href={event.meeting_link}
+                  href={event.meetingLink}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-3 py-1.5 border border-teal-600 text-teal-600 rounded-lg text-sm font-medium hover:bg-teal-50 transition-colors"

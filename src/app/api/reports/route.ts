@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import { getMemberById, getGroupById, createReport } from '@/lib/firestore';
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,14 +24,14 @@ export async function POST(request: NextRequest) {
 
     // Validate the reported entity exists
     if (reportedMemberId) {
-      const member = db.prepare('SELECT id FROM members WHERE id = ?').get(reportedMemberId);
+      const member = await getMemberById(reportedMemberId);
       if (!member) {
         return NextResponse.json({ error: 'Member not found' }, { status: 404 });
       }
     }
 
     if (reportedGroupId) {
-      const group = db.prepare('SELECT id FROM groups WHERE id = ?').get(reportedGroupId);
+      const group = await getGroupById(reportedGroupId);
       if (!group) {
         return NextResponse.json({ error: 'Group not found' }, { status: 404 });
       }
@@ -39,10 +39,14 @@ export async function POST(request: NextRequest) {
 
     const id = uuidv4();
 
-    db.prepare(`
-      INSERT INTO reports (id, reporter_id, reported_member_id, reported_group_id, reason, description, status)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending')
-    `).run(id, user.id, reportedMemberId || null, reportedGroupId || null, reason, description || null);
+    await createReport({
+      id,
+      reporterId: user.id,
+      reportedMemberId: reportedMemberId || undefined,
+      reportedGroupId: reportedGroupId || undefined,
+      reason,
+      description: description || undefined,
+    });
 
     return NextResponse.json({ success: true, id });
   } catch (error) {

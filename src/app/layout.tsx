@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { AuthProvider } from '@/lib/AuthContext';
 
 export const metadata: Metadata = {
   title: 'Aloha Rising - Find Purpose Through Connection',
@@ -20,7 +21,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased min-h-screen">{children}</body>
+      <body className="antialiased min-h-screen">
+          <AuthProvider>{children}</AuthProvider>
+        </body>
     </html>
   );
 }

@@ -1,96 +1,60 @@
-import bcrypt from 'bcryptjs';
-import { v4 as uuidv4 } from 'uuid';
-import db, { Member } from './db';
-import { getSession } from './session';
+import { cookies } from 'next/headers';
+import { adminAuth as getAdminAuth } from './firebase-admin';
+import { getMemberById } from './firestore';
+import type { Member } from './firestore';
 
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12);
-}
+// Helper to get the Auth instance
+const adminAuth = () => getAdminAuth();
 
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(password, hash);
-}
+const SESSION_COOKIE_NAME = 'session';
+const SESSION_EXPIRY_DAYS = 14;
 
-export function createMember(data: {
-  email: string;
-  password: string;
-  name: string;
-  location?: string;
-  whatBringsYou?: string;
-}): Member {
-  const id = uuidv4();
-  const passwordHash = bcrypt.hashSync(data.password, 12);
-
-  const stmt = db.prepare(`
-    INSERT INTO members (id, email, password_hash, name, location, what_brings_you, role)
-    VALUES (?, ?, ?, ?, ?, ?, 'member')
-  `);
-
-  stmt.run(id, data.email.toLowerCase(), passwordHash, data.name, data.location || null, data.whatBringsYou || null);
-
-  return getMemberById(id)!;
-}
-
-export function getMemberByEmail(email: string): Member | undefined {
-  const stmt = db.prepare('SELECT * FROM members WHERE email = ?');
-  return stmt.get(email.toLowerCase()) as Member | undefined;
-}
-
-export function getMemberById(id: string): Member | undefined {
-  const stmt = db.prepare('SELECT * FROM members WHERE id = ?');
-  return stmt.get(id) as Member | undefined;
-}
-
-export function updateMember(
-  id: string,
-  data: Partial<Pick<Member, 'name' | 'location' | 'bio' | 'can_help_with' | 'looking_for'>>
-): void {
-  const updates: string[] = [];
-  const values: (string | null)[] = [];
-
-  if (data.name !== undefined) {
-    updates.push('name = ?');
-    values.push(data.name);
-  }
-  if (data.location !== undefined) {
-    updates.push('location = ?');
-    values.push(data.location || null);
-  }
-  if (data.bio !== undefined) {
-    updates.push('bio = ?');
-    values.push(data.bio || null);
-  }
-  if (data.can_help_with !== undefined) {
-    updates.push('can_help_with = ?');
-    values.push(data.can_help_with || null);
-  }
-  if (data.looking_for !== undefined) {
-    updates.push('looking_for = ?');
-    values.push(data.looking_for || null);
-  }
-
-  if (updates.length === 0) return;
-
-  updates.push('updated_at = CURRENT_TIMESTAMP');
-  values.push(id);
-
-  const stmt = db.prepare(`UPDATE members SET ${updates.join(', ')} WHERE id = ?`);
-  stmt.run(...values);
-}
-
-export function getAllMembers(): Member[] {
-  const stmt = db.prepare('SELECT * FROM members ORDER BY created_at DESC');
-  return stmt.all() as Member[];
-}
-
+// Verify the session cookie and get the current user
 export async function getCurrentUser(): Promise<Member | null> {
-  const session = await getSession();
-  if (!session.isLoggedIn || !session.userId) {
+  try {
+    const cookieStore = await cookies();
+    const sessionCookie = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+
+    if (!sessionCookie) {
+      return null;
+    }
+
+    // Verify the session cookie
+    const decodedClaims = await adminAuth().verifySessionCookie(sessionCookie, true);
+
+    // Get the member from Firestore
+    const member = await getMemberById(decodedClaims.uid);
+    return member;
+  } catch (error) {
+    console.error('Error getting current user:', error);
     return null;
   }
-  return getMemberById(session.userId) || null;
 }
 
+// Create a session cookie from an ID token
+export async function createSessionCookie(idToken: string): Promise<string> {
+  const expiresIn = SESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000; // in milliseconds
+  const sessionCookie = await adminAuth().createSessionCookie(idToken, { expiresIn });
+  return sessionCookie;
+}
+
+// Verify an ID token and get user info
+export async function verifyIdToken(idToken: string) {
+  try {
+    const decodedToken = await adminAuth().verifyIdToken(idToken);
+    return decodedToken;
+  } catch (error) {
+    console.error('Error verifying ID token:', error);
+    return null;
+  }
+}
+
+// Check if a user is an admin
 export function isAdmin(member: Member | null): boolean {
   return member?.role === 'admin';
+}
+
+// Check if a user is a facilitator
+export function isFacilitator(member: Member | null): boolean {
+  return member?.role === 'facilitator' || member?.role === 'admin';
 }

@@ -10,7 +10,7 @@ interface ConversationRequestButtonProps {
   existingRequest?: {
     id: string;
     status: string;
-    from_member_id: string;
+    fromMemberId: string;
   };
   currentUserId: string;
 }
@@ -61,7 +61,7 @@ export default function ConversationRequestButton({
   // If there's already a pending or accepted request
   if (existingRequest || success) {
     const status = success ? 'pending' : existingRequest?.status;
-    const isFromMe = success || existingRequest?.from_member_id === currentUserId;
+    const isFromMe = success || existingRequest?.fromMemberId === currentUserId;
 
     if (status === 'pending') {
       return (

@@ -1,16 +1,7 @@
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import { getAllMembers } from '@/lib/firestore';
 import Card from '@/components/Card';
-
-interface MemberRow {
-  id: string;
-  name: string;
-  location: string | null;
-  bio: string | null;
-  can_help_with: string | null;
-  looking_for: string | null;
-}
 
 export default async function MembersPage() {
   const currentUser = await getCurrentUser();
@@ -20,14 +11,17 @@ export default async function MembersPage() {
   }
 
   // Get all members except current user
-  const members = db
-    .prepare(
-      `SELECT id, name, location, bio, can_help_with, looking_for
-       FROM members
-       WHERE id != ?
-       ORDER BY created_at DESC`
-    )
-    .all(currentUser.id) as MemberRow[];
+  const allMembers = await getAllMembers();
+  const members = allMembers
+    .filter((m) => m.id !== currentUser.id)
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      location: m.location,
+      bio: m.bio,
+      canHelpWith: m.canHelpWith,
+      lookingFor: m.lookingFor,
+    }));
 
   return (
     <div className="space-y-8">
@@ -55,17 +49,17 @@ export default async function MembersPage() {
 
                 {member.bio && <p className="mt-4 text-gray-600 text-sm line-clamp-2">{member.bio}</p>}
 
-                {member.can_help_with && (
+                {member.canHelpWith && (
                   <div className="mt-4">
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Can Help With</p>
-                    <p className="mt-1 text-sm text-gray-700 line-clamp-2">{member.can_help_with}</p>
+                    <p className="mt-1 text-sm text-gray-700 line-clamp-2">{member.canHelpWith}</p>
                   </div>
                 )}
 
-                {member.looking_for && (
+                {member.lookingFor && (
                   <div className="mt-3">
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Looking For</p>
-                    <p className="mt-1 text-sm text-gray-700 line-clamp-2">{member.looking_for}</p>
+                    <p className="mt-1 text-sm text-gray-700 line-clamp-2">{member.lookingFor}</p>
                   </div>
                 )}
 

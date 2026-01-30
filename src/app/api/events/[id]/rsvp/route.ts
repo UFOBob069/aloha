@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import { getEventById, isEventAttendee, addEventAttendee, removeEventAttendee } from '@/lib/firestore';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -16,26 +16,21 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
 
     // Check event exists
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(id);
+    const event = await getEventById(id);
 
     if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
     // Check if already RSVP'd
-    const existingRsvp = db
-      .prepare('SELECT * FROM event_attendees WHERE event_id = ? AND member_id = ?')
-      .get(id, user.id);
+    const isAttending = await isEventAttendee(id, user.id);
 
-    if (existingRsvp) {
+    if (isAttending) {
       // Toggle - remove RSVP
-      db.prepare('DELETE FROM event_attendees WHERE event_id = ? AND member_id = ?').run(id, user.id);
+      await removeEventAttendee(id, user.id);
     } else {
       // Add RSVP
-      db.prepare(`
-        INSERT INTO event_attendees (event_id, member_id, rsvp_status)
-        VALUES (?, ?, 'attending')
-      `).run(id, user.id);
+      await addEventAttendee(id, user.id);
     }
 
     // Redirect back to events page

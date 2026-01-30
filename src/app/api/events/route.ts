@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
+import { Timestamp } from 'firebase-admin/firestore';
 import { getCurrentUser } from '@/lib/auth';
-import db from '@/lib/db';
+import { createEvent, addEventAttendee, getGroupMembers, toTimestamp } from '@/lib/firestore';
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,9 +22,8 @@ export async function POST(request: NextRequest) {
 
     // If groupId is provided, check if user is facilitator of that group
     if (groupId) {
-      const membership = db
-        .prepare('SELECT role FROM group_members WHERE group_id = ? AND member_id = ?')
-        .get(groupId, user.id) as { role: string } | undefined;
+      const groupMembers = await getGroupMembers(groupId);
+      const membership = groupMembers.find((m) => m.memberId === user.id);
 
       if (!membership && user.role !== 'admin') {
         return NextResponse.json({ error: 'Not a member of this group' }, { status: 403 });
@@ -38,26 +38,20 @@ export async function POST(request: NextRequest) {
 
     const id = uuidv4();
 
-    db.prepare(`
-      INSERT INTO events (id, title, description, event_date, event_type, meeting_link, location, group_id, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    await createEvent({
       id,
       title,
-      description || null,
-      eventDate,
-      eventType || 'online',
-      meetingLink || null,
-      location || null,
-      groupId || null,
-      user.id
-    );
+      description: description || undefined,
+      eventDate: toTimestamp(new Date(eventDate)),
+      eventType: eventType || 'online',
+      meetingLink: meetingLink || undefined,
+      location: location || undefined,
+      groupId: groupId || undefined,
+      createdBy: user.id,
+    });
 
     // Auto-RSVP the creator
-    db.prepare(`
-      INSERT INTO event_attendees (event_id, member_id, rsvp_status)
-      VALUES (?, ?, 'attending')
-    `).run(id, user.id);
+    await addEventAttendee(id, user.id);
 
     return NextResponse.json({ success: true, id });
   } catch (error) {
