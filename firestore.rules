@@ -1,0 +1,113 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if user owns the document
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/members/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Members collection
+    match /members/{memberId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isOwner(memberId);
+      allow update: if isAuthenticated() && (isOwner(memberId) || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Groups collection
+    match /groups/{groupId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Group members collection
+    match /group_members/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        resource.data.memberId == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.memberId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // Events collection
+    match /events/{eventId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+    }
+
+    // Event attendees collection
+    match /event_attendees/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && resource.data.memberId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.memberId == request.auth.uid;
+    }
+
+    // Conversation requests collection
+    match /conversation_requests/{requestId} {
+      allow read: if isAuthenticated() && (
+        resource.data.fromMemberId == request.auth.uid ||
+        resource.data.toMemberId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && request.resource.data.fromMemberId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.toMemberId == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Discussion posts collection
+    match /discussion_posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.authorId == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.authorId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // Activities collection
+    match /activities/{activityId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false; // Activities are immutable
+      allow delete: if isAdmin();
+    }
+
+    // Reports collection (for content moderation)
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}
